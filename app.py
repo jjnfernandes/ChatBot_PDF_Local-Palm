@@ -1,12 +1,13 @@
 import streamlit as st
 import toml
+import subprocess
 
 from pypdf import PdfReader
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import FAISS, Qdrant
-from langchain.chains import RetrievalQA
+from langchain.vectorstores import Qdrant
+from langchain.chains import ConversationalRetrievalChain
 from langchain.llms import Ollama
 from langchain.memory import ConversationBufferMemory
 
@@ -64,59 +65,6 @@ def on_embedding_model_change(selected_model):
         st.session_state.embedding_model_change_state = True
 
 
-def load_models():
-    LLM_TYPES = ["Google PaLM", "Ollama"]
-    OLLAMA_MODELS = ["Mistral 7B", "EverythingLM 13B", "Orca-Mini 3B"]
-    EMBEDDING_MODELS = ["HuggingFace Embeddings", "GooglePalm Embeddings"]
-
-    model_type = st.selectbox("Select LLM ⬇️", LLM_TYPES)
-    if model_type == "Google PaLM":
-        run_google_palm()
-    elif model_type == "Ollama":
-        st.session_state.ollama_model = st.radio("Ollama Model", OLLAMA_MODELS)
-    st.session_state.llm_type = model_type
-    # handling the embedding models
-    embedding_model = st.radio("Embedding Model ⬇️", EMBEDDING_MODELS)
-    on_embedding_model_change(embedding_model)
-
-
-def load_ui():
-    st.set_page_config(
-        page_title="ChatPDF",
-        page_icon=":books:",
-        layout="wide",
-        initial_sidebar_state="auto",
-        menu_items=None,
-    )
-
-    st.title("ChatPDF :books:")
-    # checking the session state for the conversation
-    if "conversation" not in st.session_state:
-        st.session_state.conversation = None
-    if "chat_dialog_history" not in st.session_state.keys():
-        st.session_state.chat_dialog_history = [
-            {"role": "assistant", "content": "Hello!, Ask me your queries 🤔"}
-        ]
-    # using for the check of uploaded documents
-    if "disabled" not in st.session_state:
-        st.session_state.disabled = True
-    # using for api state check
-    if "api_state_update" not in st.session_state:
-        st.session_state.api_state_update = False
-    if "api_state_set" not in st.session_state:
-        st.session_state.api_state_set = False
-    if "ollama_model" not in st.session_state:
-        st.session_state.ollama_model = "Mistral 7B"
-    if "embedding_model" not in st.session_state:
-        st.session_state.embedding_model = " "
-    if "llm_type" not in st.session_state:
-        st.session_state.llm_type = "Google PaLM"
-    if "llm" not in st.session_state:
-        st.session_state.llm = dict()
-    if "embedding_model_change_state" not in st.session_state:
-        st.session_state.embedding_model_change_state = False
-
-
 def get_text_chunks(pdf_docs):
     chunks = list()
     for pdf in pdf_docs:
@@ -169,21 +117,9 @@ def get_vectorstore(chunks):
 
 
 def get_conversation(vectorstore):
-    llm = Ollama(base_url="http://localhost:11434", model="everythinglm:latest")
-    # if st.session_state.llm_type == "Ollama":
-    #     if st.session_state.ollama_model == "Mistral 7B":
-    #         st.session_state.llm = Ollama(base_url = 'http://localhost:11434', model = 'mistral:instruct')
-    #     if st.session_state.ollama_model == "Everythinglm 13B":
-    #         st.session_state.llm = Ollama(base_url = 'http://localhost:11434', model = 'everythinglm:latest')
-    #     if st.session_state.ollama_model == "Orca-Mini 3B":
-    #         st.session_state.llm = Ollama(base_url = 'http://localhost:11434', model = 'orca-mini')
     if st.session_state.llm_type == "Ollama":
-        if st.session_state.ollama_model == "Mistral 7B":
-            llm = Ollama(base_url="http://localhost:11434", model="mistral:instruct")
-        # if st.session_state.ollama_model == "Everythinglm 13B":
-        # llm = Ollama(base_url = 'http://localhost:11434', model = 'everythinglm:latest')
-        if st.session_state.ollama_model == "Orca-Mini 3B":
-            llm = Ollama(base_url="http://localhost:11434", model="orca-mini")
+        model = st.session_state.ollama_model
+        llm = Ollama(base_url='http://localhost:11434', model=model )
 
     elif st.session_state.llm_type == "Google PaLM":
         google_api_key = st.secrets["palm_api_key"]
@@ -193,11 +129,12 @@ def get_conversation(vectorstore):
 
     memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
-    conversation = RetrievalQA.from_chain_type(
+    conversation = ConversationalRetrievalChain.from_llm(
         llm,
         chain_type="stuff",
-        retriever=vectorstore.as_retriever(search_type="mmr"),
+        retriever=vectorstore.as_retriever(),
         memory=memory,
+        return_source_documents=False,
     )
 
     return conversation
@@ -214,11 +151,70 @@ def process_prompt():
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 # response = st.session_state.chat_engine.chat(prompt)
-                response = st.session_state.conversation({"query": prompt})
+                response = st.session_state.conversation({"question": prompt})
+                print(response)
+                # response = st.session_state.conversation.run(prompt)
                 st.session_state.chat_history = response["chat_history"]
-                st.write(response["result"])
-                message = {"role": "assistant", "content": response["result"]}
+                st.write(response["answer"])
+                message = {"role": "assistant", "content": response["answer"]}
                 st.session_state.chat_dialog_history.append(message)
+
+
+def load_models():
+    LLM_TYPES = ["Google PaLM", "Ollama"]
+    #OLLAMA_MODELS = ["Mistral 7B", "EverythingLM 13B", "Orca-Mini 3B"]
+    EMBEDDING_MODELS = ["HuggingFace Embeddings", "GooglePalm Embeddings"]
+
+    #Checking the available ollama models
+    ollama_list_output = subprocess.check_output(["ollama", "list"]).decode().split("\n")
+    OLLAMA_MODELS = [line.split()[0] for line in ollama_list_output if ":" in line]
+
+    model_type = st.selectbox("Select LLM ⬇️", LLM_TYPES)
+    if model_type == "Google PaLM":
+        run_google_palm()
+    elif model_type == "Ollama":
+        st.session_state.ollama_model = st.selectbox("Ollama Model", OLLAMA_MODELS)
+    st.session_state.llm_type = model_type
+    # handling the embedding models
+    embedding_model = st.radio("Embedding Model ⬇️", EMBEDDING_MODELS)
+    on_embedding_model_change(embedding_model)
+
+
+def load_ui():
+    st.set_page_config(
+        page_title="ChatPDF",
+        page_icon=":books:",
+        layout="wide",
+        initial_sidebar_state="auto",
+        menu_items=None,
+    )
+
+    st.title("ChatPDF :books:")
+    # checking the session state for the conversation
+    if "conversation" not in st.session_state:
+        st.session_state.conversation = None
+    if "chat_dialog_history" not in st.session_state.keys():
+        st.session_state.chat_dialog_history = [
+            {"role": "assistant", "content": "Hello!, Ask me your queries 🤔"}
+        ]
+    # using for the check of uploaded documents
+    if "disabled" not in st.session_state:
+        st.session_state.disabled = True
+    # using for api state check
+    if "api_state_update" not in st.session_state:
+        st.session_state.api_state_update = False
+    if "api_state_set" not in st.session_state:
+        st.session_state.api_state_set = False
+    if "ollama_model" not in st.session_state:
+        st.session_state.ollama_model = ""
+    if "embedding_model" not in st.session_state:
+        st.session_state.embedding_model = " "
+    if "llm_type" not in st.session_state:
+        st.session_state.llm_type = "Google PaLM"
+    if "llm" not in st.session_state:
+        st.session_state.llm = dict()
+    if "embedding_model_change_state" not in st.session_state:
+        st.session_state.embedding_model_change_state = False
 
 
 def process_document():
