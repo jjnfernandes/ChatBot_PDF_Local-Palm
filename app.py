@@ -15,6 +15,10 @@ import google.generativeai as palm
 from langchain.embeddings import GooglePalmEmbeddings
 from langchain.llms import GooglePalm
 
+from langchain.callbacks.manager import CallbackManager
+from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
+from langchain.chat_models import ChatOllama
+
 
 def set_api_key(google_api_key):
     with open(".streamlit/secrets.toml", "r+") as f:
@@ -119,7 +123,13 @@ def get_vectorstore(chunks):
 def get_conversation(vectorstore):
     if st.session_state.llm_type == "Ollama":
         model = st.session_state.ollama_model
-        llm = Ollama(base_url='http://localhost:11434', model=model )
+        llm = ChatOllama(
+            base_url="http://localhost:11434",
+            model=model,
+            verbose=True,
+            callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]),
+            temperature=0.2
+        )
 
     elif st.session_state.llm_type == "Google PaLM":
         google_api_key = st.secrets["palm_api_key"]
@@ -146,27 +156,26 @@ def process_prompt():
     # Display the prior chat messages
     for message in st.session_state.chat_dialog_history:
         with st.chat_message(name=message["role"]):
-            st.write(message["content"])
+            st.markdown(message["content"])
     if st.session_state.chat_dialog_history[-1]["role"] != "assistant":
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                # response = st.session_state.chat_engine.chat(prompt)
                 response = st.session_state.conversation({"question": prompt})
-                print(response)
-                # response = st.session_state.conversation.run(prompt)
+                st.markdown(response["answer"])
                 st.session_state.chat_history = response["chat_history"]
-                st.write(response["answer"])
                 message = {"role": "assistant", "content": response["answer"]}
                 st.session_state.chat_dialog_history.append(message)
 
 
 def load_models():
     LLM_TYPES = ["Google PaLM", "Ollama"]
-    #OLLAMA_MODELS = ["Mistral 7B", "EverythingLM 13B", "Orca-Mini 3B"]
+    # OLLAMA_MODELS = ["Mistral 7B", "EverythingLM 13B", "Orca-Mini 3B"]
     EMBEDDING_MODELS = ["HuggingFace Embeddings", "GooglePalm Embeddings"]
 
-    #Checking the available ollama models
-    ollama_list_output = subprocess.check_output(["ollama", "list"]).decode().split("\n")
+    # Checking the available ollama models
+    ollama_list_output = (
+        subprocess.check_output(["ollama", "list"]).decode().split("\n")
+    )
     OLLAMA_MODELS = [line.split()[0] for line in ollama_list_output if ":" in line]
 
     model_type = st.selectbox("Select LLM ⬇️", LLM_TYPES)
