@@ -6,7 +6,7 @@ from pypdf import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import Qdrant
-from langchain.chains import RetrievalQA
+from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 
 import google.generativeai as palm
@@ -141,7 +141,7 @@ def get_conversation(vectorstore):
         output_key="answer",
         return_messages=True,
     )
-    conversation = RetrievalQA.from_chain_type(
+    conversation = ConversationalRetrievalChain.from_llm(
         llm,
         chain_type="stuff",
         retriever=vectorstore.as_retriever(),
