@@ -3,12 +3,10 @@ import toml
 import subprocess
 
 from pypdf import PdfReader
-from langchain.text_splitter import CharacterTextSplitter
-from langchain.text_splitter import CharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import Qdrant
-from langchain.chains import ConversationalRetrievalChain
-from langchain.llms import Ollama
+from langchain.chains import RetrievalQA
 from langchain.memory import ConversationBufferMemory
 
 import google.generativeai as palm
@@ -78,10 +76,10 @@ def get_text_chunks(pdf_docs):
             text += page.extract_text()
         text = text.encode("ascii", "ignore").decode("ascii")
 
-        text_splitter = CharacterTextSplitter(
-            separator="\n",
-            chunk_size=1500,
-            chunk_overlap=200,
+        text_splitter = RecursiveCharacterTextSplitter(
+            separators=["\n\n", "\n", " ", ""],
+            chunk_size=600,
+            chunk_overlap=300,
             length_function=len,
         )
         docs = text_splitter.create_documents([text])
@@ -128,7 +126,7 @@ def get_conversation(vectorstore):
             model=model,
             verbose=True,
             callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]),
-            temperature=0.2
+            temperature=0.2,
         )
 
     elif st.session_state.llm_type == "Google PaLM":
@@ -137,9 +135,13 @@ def get_conversation(vectorstore):
             google_api_key=google_api_key, model="chat-bison-001", temperatue=0.2
         )
 
-    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-
-    conversation = ConversationalRetrievalChain.from_llm(
+    memory = ConversationBufferMemory(
+        memory_key="chat_history",
+        input_key="question",
+        output_key="answer",
+        return_messages=True,
+    )
+    conversation = RetrievalQA.from_chain_type(
         llm,
         chain_type="stuff",
         retriever=vectorstore.as_retriever(),
@@ -151,8 +153,12 @@ def get_conversation(vectorstore):
 
 
 def process_prompt():
+    formatted_prompt = """Answer the question from the CONTEXTS provided to you,
+    give VERBOSE answers, unless stated othewise by me.
+    The Question is: what does the document say about this: """
     if prompt := st.chat_input("Ask a question about your documents"):
         st.session_state.chat_dialog_history.append({"role": "user", "content": prompt})
+        formatted_prompt += prompt
     # Display the prior chat messages
     for message in st.session_state.chat_dialog_history:
         with st.chat_message(name=message["role"]):
@@ -160,7 +166,7 @@ def process_prompt():
     if st.session_state.chat_dialog_history[-1]["role"] != "assistant":
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                response = st.session_state.conversation({"question": prompt})
+                response = st.session_state.conversation({"question": formatted_prompt})
                 st.markdown(response["answer"])
                 st.session_state.chat_history = response["chat_history"]
                 message = {"role": "assistant", "content": response["answer"]}
