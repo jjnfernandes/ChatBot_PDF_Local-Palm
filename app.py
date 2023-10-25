@@ -252,7 +252,7 @@ def process_document():
         if pdf_docs := st.file_uploader(
             "Upload the PDFs here:", accept_multiple_files=True
         ):
-            if st.button("Process", type="primary", use_container_width=True) and st.session_state.error is False:
+            if st.button("Process", type="primary", use_container_width=True, disabled=st.session_state.error):
                 with st.spinner("Processing..."):
                     if (
                         st.session_state.disabled
