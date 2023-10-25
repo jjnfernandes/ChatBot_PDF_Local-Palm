@@ -127,6 +127,8 @@ def get_conversation(vectorstore):
             verbose=True,
             callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]),
             temperature=0.2,
+            #set the number of cores to run ollama
+            #num_ctx=16 
         )
 
     elif st.session_state.llm_type == "Google PaLM":
@@ -179,15 +181,23 @@ def load_models():
     EMBEDDING_MODELS = ["HuggingFace Embeddings", "GooglePalm Embeddings"]
 
     # Checking the available ollama models
-    ollama_list_output = (
-        subprocess.check_output(["ollama", "list"]).decode().split("\n")
-    )
-    OLLAMA_MODELS = [line.split()[0] for line in ollama_list_output if ":" in line]
+    try:
+        ollama_list_output = subprocess.check_output(["ollama", "list"]).decode().split("\n")
+    except FileNotFoundError:
+        try:
+            ollama_list_output = subprocess.check_output(["docker", "exec", "-it", "ollama", "ollama", "list"]).decode().split("\n")
+        except FileNotFoundError:
+            ollama_list_output = []
 
+    OLLAMA_MODELS = [line.split()[0] for line in ollama_list_output if ":" in line and "ollama:" not in line]
+    
     model_type = st.selectbox("Select LLM ⬇️", LLM_TYPES)
     if model_type == "Google PaLM":
         run_google_palm()
     elif model_type == "Ollama":
+        if not OLLAMA_MODELS:
+            st.error("Ollama is not installed.")
+            st.session_state.error=True
         st.session_state.ollama_model = st.selectbox("Ollama Model", OLLAMA_MODELS)
     st.session_state.llm_type = model_type
     # handling the embedding models
@@ -230,6 +240,8 @@ def load_ui():
         st.session_state.llm = dict()
     if "embedding_model_change_state" not in st.session_state:
         st.session_state.embedding_model_change_state = False
+    if "error" not in st.session_state:
+        st.session_state.error = False
 
 
 def process_document():
@@ -240,7 +252,7 @@ def process_document():
         if pdf_docs := st.file_uploader(
             "Upload the PDFs here:", accept_multiple_files=True
         ):
-            if st.button("Process", type="primary", use_container_width=True):
+            if st.button("Process", type="primary", use_container_width=True) and st.session_state.error is False:
                 with st.spinner("Processing..."):
                     if (
                         st.session_state.disabled
