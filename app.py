@@ -2,8 +2,6 @@ import streamlit as st
 import toml
 import subprocess
 
-from pypdf import PdfReader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import Qdrant
 from langchain.chains import ConversationalRetrievalChain
@@ -16,6 +14,8 @@ from langchain.llms import GooglePalm
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.chat_models import ChatOllama
+
+from uploadFile import UploadFile
 
 
 def set_api_key(google_api_key):
@@ -67,29 +67,6 @@ def on_embedding_model_change(selected_model):
         st.session_state.embedding_model_change_state = True
 
 
-def get_text_chunks(pdf_docs):
-    chunks = list()
-    for pdf in pdf_docs:
-        text = ""
-        pdf_reader = PdfReader(pdf)
-        for page in pdf_reader.pages:
-            text += page.extract_text()
-        text = text.encode("ascii", "ignore").decode("ascii")
-
-        text_splitter = RecursiveCharacterTextSplitter(
-            separators=["\n\n", "\n", " ", ""],
-            chunk_size=600,
-            chunk_overlap=300,
-            length_function=len,
-        )
-        docs = text_splitter.create_documents([text])
-        for i, doc in enumerate(docs):
-            doc.metadata = {"source": f"source_{i}"}
-            chunks.append(doc)
-
-    return chunks
-
-
 def select_embedding_model():
     embeddings = ""
     if st.session_state.embedding_model == "HuggingFace Embeddings":
@@ -127,8 +104,7 @@ def get_conversation(vectorstore):
             verbose=True,
             callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]),
             temperature=0.2,
-            #set the number of cores to run ollama
-            #num_ctx=16 
+            num_ctx=16
         )
 
     elif st.session_state.llm_type == "Google PaLM":
@@ -183,10 +159,10 @@ def load_models():
     # Checking the available ollama models
     try:
         ollama_list_output = subprocess.check_output(["ollama", "list"]).decode().split("\n")
-    except FileNotFoundError:
+    except Exception:
         try:
             ollama_list_output = subprocess.check_output(["docker", "exec", "-it", "ollama", "ollama", "list"]).decode().split("\n")
-        except FileNotFoundError:
+        except Exception:
             ollama_list_output = []
 
     OLLAMA_MODELS = [line.split()[0] for line in ollama_list_output if ":" in line and "ollama:" not in line]
@@ -196,9 +172,10 @@ def load_models():
         run_google_palm()
     elif model_type == "Ollama":
         if not OLLAMA_MODELS:
-            st.error("Ollama is not installed.")
+            st.error("Ollama is not installed or not running")
             st.session_state.error=True
-        st.session_state.ollama_model = st.selectbox("Ollama Model", OLLAMA_MODELS)
+        else:
+            st.session_state.ollama_model = st.selectbox("Ollama Model", OLLAMA_MODELS)
     st.session_state.llm_type = model_type
     # handling the embedding models
     embedding_model = st.radio("Embedding Model ⬇️", EMBEDDING_MODELS)
@@ -207,14 +184,14 @@ def load_models():
 
 def load_ui():
     st.set_page_config(
-        page_title="ChatPDF",
+        page_title="Fileo AI :books:",
         page_icon=":books:",
         layout="wide",
         initial_sidebar_state="auto",
         menu_items=None,
     )
 
-    st.title("ChatPDF :books:")
+    st.title("Fileo AI :books:")
     # checking the session state for the conversation
     if "conversation" not in st.session_state:
         st.session_state.conversation = None
@@ -242,6 +219,8 @@ def load_ui():
         st.session_state.embedding_model_change_state = False
     if "error" not in st.session_state:
         st.session_state.error = False
+    if "vectorstore" not in st.session_state:
+        st.session_state.vectorstore = []
 
 
 def process_document():
@@ -249,6 +228,7 @@ def process_document():
         load_models()
         st.info("⚠️ Ensure Docs are processed again on change of Model configurations")
         # for the documents
+        text_chunks = []
         if pdf_docs := st.file_uploader(
             "Upload the PDFs here:", accept_multiple_files=True
         ):
@@ -258,7 +238,9 @@ def process_document():
                         st.session_state.disabled
                         or st.session_state.embedding_model_change_state
                     ):
-                        text_chunks = get_text_chunks(pdf_docs)
+                        for pdf in pdf_docs:
+                            upload = UploadFile(pdf)
+                            text_chunks.extend(upload.get_document_splits())
                         st.session_state.vectorstore = get_vectorstore(text_chunks)
                         st.session_state.embedding_model_change_state = False
                     # create conversation chain
@@ -270,7 +252,7 @@ def process_document():
                     # Update the session state to enable the text input
                     st.toast("The processing was successful! Ask away!", icon="✅")
                     st.session_state.disabled = False
-
+    st.write(text_chunks)
     if st.session_state.disabled:
         st.write("🔒 Please upload and process your PDFs to unlock the question field.")
 
