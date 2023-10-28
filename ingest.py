@@ -37,7 +37,8 @@ class FileProcessor:
             loader = UnstructuredImageLoader(self.fileLocation)
             document = loader.load()
         else:
-            return "Unsupported file type"
+            #for unsupported file type
+            return []
             
 
         text_splitter = RecursiveCharacterTextSplitter(
