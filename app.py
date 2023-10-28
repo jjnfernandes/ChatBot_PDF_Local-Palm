@@ -1,5 +1,4 @@
 import streamlit as st
-import toml
 import subprocess
 
 from langchain.embeddings import HuggingFaceEmbeddings
@@ -7,7 +6,6 @@ from langchain.vectorstores import Qdrant
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 
-import google.generativeai as palm
 from langchain.embeddings import GooglePalmEmbeddings
 from langchain.llms import GooglePalm
 
@@ -16,47 +14,45 @@ from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.chat_models import ChatOllama
 
 from uploadFile import UploadFile
-
-
-def set_api_key(google_api_key):
-    with open(".streamlit/secrets.toml", "r+") as f:
-        secrets = toml.load(f)
-        secrets["palm_api_key"] = google_api_key
-        f.seek(0)
-        toml.dump(secrets, f)
-        f.truncate()
-
+from helper.helper import Helper
+from prompt import SystemPrompt
 
 def run_google_palm():
+    # Configure the API key
     google_api_key = st.secrets["palm_api_key"]
-    palm.configure(api_key=google_api_key)
-    # If the API key is not set in the secrets.toml file, prompt the user to enter it.
-    if google_api_key == "":
-        google_api_key = st.text_input("Google PaLM API Key", type="password")
-        # If the user enters an API key, write it to the secrets.toml file.
-        if st.button("Set API_KEY"):
-            # google_api_key = st.text_input("Google PaLM API Key", type='password',key='first')
-            if google_api_key != "":
-                set_api_key(google_api_key)
-                st.session_state.api_state_set = True
-                st.rerun()
-    else:
-        if st.session_state.api_state_set:
-            st.write("API key is set✅")
-            st.session_state.api_state_set = False
 
-        if st.toggle("Update API_KEY"):
-            google_api_key = st.text_input(
-                "Enter API key", type="password", key="second"
-            )
-            if st.button("Update API_KEY"):
-                # google_api_key = st.text_input("Google PaLM API Key", type='password',key='first')
-                if google_api_key != "":
-                    set_api_key(google_api_key)
-                    st.session_state.api_state_update = True
-                    st.rerun()
+    # Create an instance of the Helper class
+    helper = Helper()
+
+    # Check if the API key is set
+    if google_api_key == "":
+        # Prompt the user to enter the API key
+        google_api_key = st.text_input("Google PaLM API Key", type="password")
+
+        # If the user enters an API key, write it to the secrets.toml file.
+        if st.button("Set API_KEY") and google_api_key != "":
+            helper.set_api_key(google_api_key)
+            st.rerun()
+
+    else:
+        # If the API key is already set, display a message
+        if not st.session_state.api_state_update:
+            st.write("API key is set✅")
+
+        # Provide an option to update the API key
+        if st.toggle("Update API Key"):
+            google_api_key = st.text_input("Enter API key", type="password", key="second")
+
+            # If the user enters a new API key, update it in the secrets.toml file.
+            if st.button("Confirm") and google_api_key != "":
+                helper.set_api_key(google_api_key)
+                st.session_state.api_state_update = True
+                st.rerun()
+
         else:
             st.session_state.api_state_update = False
+
+    # Display a toast message when the API key is updated
     if st.session_state.api_state_update:
         st.toast("API_KEY Updated✅")
 
@@ -82,9 +78,6 @@ def select_embedding_model():
 
 
 def get_vectorstore(chunks):
-    # storing embeddings in the vector store
-    # vectorstore = FAISS.from_texts(texts=chunks,
-    #               embedding= embeddings)
     embeddings = select_embedding_model()
     vectorstore = Qdrant.from_documents(
         chunks,
@@ -104,7 +97,9 @@ def get_conversation(vectorstore):
             verbose=True,
             callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]),
             temperature=0.2,
-            num_ctx=16
+            num_ctx=512,
+            num_thread=16,
+            stream=True
         )
 
     elif st.session_state.llm_type == "Google PaLM":
@@ -119,24 +114,21 @@ def get_conversation(vectorstore):
         output_key="answer",
         return_messages=True,
     )
-    conversation = ConversationalRetrievalChain.from_llm(
+    prompt = SystemPrompt()
+    
+    qa = ConversationalRetrievalChain.from_llm(
         llm,
         chain_type="stuff",
-        retriever=vectorstore.as_retriever(),
+        retriever=vectorstore.as_retriever(search_kwargs={"k": 2}),
         memory=memory,
-        return_source_documents=False,
+        condense_question_prompt=prompt.questionPrompt(),
     )
 
-    return conversation
-
+    return qa
 
 def process_prompt():
-    formatted_prompt = """Answer the question from the CONTEXTS provided to you,
-    give VERBOSE answers, unless stated othewise by me.
-    The Question is: what does the document say about this: """
     if prompt := st.chat_input("Ask a question about your documents"):
         st.session_state.chat_dialog_history.append({"role": "user", "content": prompt})
-        formatted_prompt += prompt
     # Display the prior chat messages
     for message in st.session_state.chat_dialog_history:
         with st.chat_message(name=message["role"]):
@@ -144,12 +136,11 @@ def process_prompt():
     if st.session_state.chat_dialog_history[-1]["role"] != "assistant":
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                response = st.session_state.conversation({"question": formatted_prompt})
+                response = st.session_state.conversation({"question": prompt})
                 st.markdown(response["answer"])
                 st.session_state.chat_history = response["chat_history"]
                 message = {"role": "assistant", "content": response["answer"]}
                 st.session_state.chat_dialog_history.append(message)
-
 
 def load_models():
     LLM_TYPES = ["Google PaLM", "Ollama"]
@@ -172,7 +163,10 @@ def load_models():
         run_google_palm()
     elif model_type == "Ollama":
         if not OLLAMA_MODELS:
-            st.error("Ollama is not installed or not running")
+            st.error("Ollama is not configured properly, Make sure:\n\n"
+                    "1. You have installed Ollama.\n"
+                    "2. Ollama is running.\n"
+                    "3. You have downloaded an Ollama model like Mistral 7B.")
             st.session_state.error=True
         else:
             st.session_state.ollama_model = st.selectbox("Ollama Model", OLLAMA_MODELS)
@@ -205,8 +199,6 @@ def load_ui():
     # using for api state check
     if "api_state_update" not in st.session_state:
         st.session_state.api_state_update = False
-    if "api_state_set" not in st.session_state:
-        st.session_state.api_state_set = False
     if "ollama_model" not in st.session_state:
         st.session_state.ollama_model = ""
     if "embedding_model" not in st.session_state:
@@ -221,7 +213,8 @@ def load_ui():
         st.session_state.error = False
     if "vectorstore" not in st.session_state:
         st.session_state.vectorstore = []
-
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
 def process_document():
     with st.sidebar:
@@ -230,7 +223,8 @@ def process_document():
         # for the documents
         text_chunks = []
         if pdf_docs := st.file_uploader(
-            "Upload the PDFs here:", accept_multiple_files=True
+            "Upload the PDFs here:", accept_multiple_files=True,
+            type=["png","jpg","jpeg","xlsx","xls","csv","pptx","docx","pdf","txt"]
         ):
             if st.button("Process", type="primary", use_container_width=True, disabled=st.session_state.error):
                 with st.spinner("Processing..."):
@@ -240,7 +234,8 @@ def process_document():
                     ):
                         for pdf in pdf_docs:
                             upload = UploadFile(pdf)
-                            text_chunks.extend(upload.get_document_splits())
+                            splits = upload.get_document_splits()
+                            text_chunks.extend(splits)
                         st.session_state.vectorstore = get_vectorstore(text_chunks)
                         st.session_state.embedding_model_change_state = False
                     # create conversation chain
@@ -252,7 +247,7 @@ def process_document():
                     # Update the session state to enable the text input
                     st.toast("The processing was successful! Ask away!", icon="✅")
                     st.session_state.disabled = False
-    st.write(text_chunks)
+    # st.write(text_chunks)
     if st.session_state.disabled:
         st.write("🔒 Please upload and process your PDFs to unlock the question field.")
 
