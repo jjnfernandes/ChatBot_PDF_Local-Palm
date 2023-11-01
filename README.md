@@ -3,6 +3,10 @@
 Chat with PDF(s) Chatbot
 =====================================
 
+## Demo App
+
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://pustakgpt.streamlit.app)
+
 This repository contains implementation of querying local PDF documents using open source LLMs or Google Palm API, using streamlit for web interface for ease of use, backend uses langchain for heavylifting.
 
 Prerequisites
