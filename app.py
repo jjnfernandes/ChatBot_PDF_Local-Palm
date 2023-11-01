@@ -18,8 +18,10 @@ from helper.helper import Helper
 from prompt import SystemPrompt
 
 def run_google_palm():
-    # Configure the API key
-    google_api_key = st.secrets["palm_api_key"]
+    try:
+        google_api_key = st.secrets["palm_api_key"]
+    except Exception:
+        google_api_key = ""
 
     # Create an instance of the Helper class
     helper = Helper()
