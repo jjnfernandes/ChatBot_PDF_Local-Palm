@@ -5,3 +5,10 @@ langchain
 google-generativeai
 sentence-transformers
 qdrant-client
+python-pptx
+openpyxl
+docx2txt
+unstructured
+pandas
+numpy
+python-multipart
