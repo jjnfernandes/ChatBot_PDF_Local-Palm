@@ -226,7 +226,7 @@ def process_document():
         text_chunks = []
         if pdf_docs := st.file_uploader(
             "Upload the PDFs here:", accept_multiple_files=True,
-            type=["png","jpg","jpeg","xlsx","xls","csv","pptx","docx","pdf","txt"]
+            type=["xlsx","xls","csv","pptx","docx","pdf","txt"]
         ):
             if st.button("Process", type="primary", use_container_width=True, disabled=st.session_state.error):
                 with st.spinner("Processing..."):
